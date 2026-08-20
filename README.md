@@ -6,6 +6,8 @@ Omarchy Notification Sounds voices every desktop notification with the KDE **Oce
 
 Sounds ship inside the plugin, so there is nothing else to install.
 
+![Notification Sounds bar widget](preview.png)
+
 ## Why you will love it
 
 - **Lightweight by design.** A ~3 MB folder of Ocean sounds and one tiny QML service—no browser, no Electron.
