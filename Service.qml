@@ -124,6 +124,13 @@ Item {
   IpcHandler {
     target: "virtuoso.notification-sounds"
 
+    // Guard against a Quickshell reload bug: IpcHandler destructors can leave
+    // the handler stranded in the registry (basecamp/omarchy #7362,
+    // quickshell-mirror/quickshell #898), which later writes through freed
+    // memory and segfaults during hot reload. Deregistering while the QML
+    // context is still alive avoids it.
+    Component.onDestruction: enabled = false
+
     function status(): string {
       return root.soundEnabled ? "on" : "off"
     }
