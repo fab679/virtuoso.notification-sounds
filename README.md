@@ -20,7 +20,7 @@ notification spec. Includes a bar widget and a launcher-menu toggle.
 ## Install
 
 ```bash
-git clone https://github.com/<you>/virtuoso.notification-sounds
+git clone https://github.com/Fabisch/virtuoso.notification-sounds.git
 mkdir -p ~/.config/omarchy/plugins
 cp -r virtuoso.notification-sounds ~/.config/omarchy/plugins/virtuoso.notification-sounds
 ```
