@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "virtuoso.notification-sounds",
+  "name": "Notification Sounds",
+  "version": "1.1.0",
+  "author": "Virtuoso",
+  "description": "Ocean sound effects for desktop notifications and USB hotplug. Toggleable from the bar and the launcher menu; silenced while Do Not Disturb is on.",
+  "kinds": [
+    "service",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "service": "Service.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Notification Sounds",
+    "description": "Toggle notification sound effects on/off",
+    "category": "System",
+    "defaultSection": "right",
+    "allowMultiple": false
+  }
+}
