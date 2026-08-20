@@ -1,0 +1,8 @@
+// Virtuoso: notification sound effects toggle (appears under Trigger -> Toggle).
+  "trigger.toggle.notification-sounds": {
+    "icon": "󰓃",
+    "label": "Notification Sounds",
+    "description": "Ocean sound effects for notifications and device hotplug",
+    "action": "omarchy-shell virtuoso.notification-sounds toggle",
+    "checked": "[[ \"$(omarchy-shell virtuoso.notification-sounds isEnabled)\" == \"on\" ]]"
+  }

@@ -14,14 +14,20 @@ import Quickshell.Io
 Item {
   id: root
 
-  // Injected by omarchy-shell (the first-party service loader).
+  // Injected by omarchy-shell (the first-party service loader). Declaring these
+  // properties is what makes the loader inject them.
   property var shell: null
+  property var manifest: null
 
   readonly property var notificationService: shell && typeof shell.firstPartyServiceFor === "function"
     ? shell.firstPartyServiceFor("omarchy.notifications") : null
   readonly property var popupModel: notificationService ? notificationService.popupModel : null
 
-  property string soundDir: "/usr/share/sounds/ocean/stereo"
+  // Bundled Ocean sounds ship inside the plugin folder (sounds/). The shell
+  // stamps each plugin manifest with its own source directory, so this works
+  // wherever the plugin is installed. Falls back to the system theme.
+  property string soundDir: root.manifest && root.manifest.__sourceDir
+    ? root.manifest.__sourceDir + "/sounds" : "/usr/share/sounds/ocean/stereo"
 
   // Freedesktop sound names that exist in the Ocean theme; a sender-provided
   // "sound-name" hint is only played if it resolves to one of these.

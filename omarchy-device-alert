@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+
+# omarchy:summary=Notify on USB device connect/disconnect
+# omarchy:group=system
+# omarchy:name=device-alert
+
+# Watches USB hotplug events and raises a device notification. The sound is
+# picked by the virtuoso.notification-sounds plugin from the category hint
+# (device -> device-added.oga, device.removed -> device-removed.oga).
+# Run with "-" to read udev --property output from stdin (for testing).
+
+alert() {
+  local action="$1" devtype="$2" v_raw="$3" v_db="$4" m_raw="$5" m_db="$6"
+  [ "$devtype" != "usb_device" ] && return 0
+  local vendor="${v_db:-$v_raw}" model="${m_db:-$m_raw}"
+  local name="$vendor $model"
+  name="${name//  / }"
+  [ -z "${name// /}" ] && name="USB device"
+  case "$action" in
+    add)
+      omarchy-notification-send --app-name "USB Devices" -c device -i drive-removable-media-usb -t 4000 \
+        "USB device connected" "$name"
+      ;;
+    remove)
+      omarchy-notification-send --app-name "USB Devices" -c device.removed -i drive-removable-media-usb -t 4000 \
+        "USB device disconnected" "$name"
+      ;;
+  esac
+}
+
+action=""; devtype=""; v_raw=""; v_db=""; m_raw=""; m_db=""
+while IFS= read -r line; do
+  case "$line" in
+    KERNEL*)
+      action=""; devtype=""; v_raw=""; v_db=""; m_raw=""; m_db=""
+      ;;
+    ACTION=*) action="${line#ACTION=}" ;;
+    DEVTYPE=*) devtype="${line#DEVTYPE=}" ;;
+    ID_VENDOR_FROM_DATABASE=*) v_db="${line#ID_VENDOR_FROM_DATABASE=}" ;;
+    ID_VENDOR=*) v_raw="${line#ID_VENDOR=}" ;;
+    ID_MODEL_FROM_DATABASE=*) m_db="${line#ID_MODEL_FROM_DATABASE=}" ;;
+    ID_MODEL=*) m_raw="${line#ID_MODEL=}" ;;
+    "") alert "$action" "$devtype" "$v_raw" "$v_db" "$m_raw" "$m_db" ;;
+  esac
+done < <(if [ "$1" = "-" ]; then cat; else udevadm monitor --udev --property --subsystem-match=usb; fi)
