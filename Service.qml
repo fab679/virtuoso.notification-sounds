@@ -64,7 +64,7 @@ Item {
 
   // Runtime on/off switch, persisted so it survives shell restarts. Toggled
   // from the menu via omarchy-shell virtuoso.notification-sounds toggle.
-  property bool enabled: true
+  property bool soundEnabled: true
   property bool settingsLoaded: false
   readonly property string stateDir: Quickshell.env("HOME") + "/.local/state/omarchy/"
   readonly property string settingsPath: stateDir + "notification-sounds.json"
@@ -88,12 +88,12 @@ Item {
     if (root.settingsLoaded) return
     var parsed = {}
     try { parsed = JSON.parse(raw || "") } catch (e) { }
-    if (typeof parsed.enabled === "boolean") root.enabled = parsed.enabled
+    if (typeof parsed.enabled === "boolean") root.soundEnabled = parsed.enabled
     root.settingsLoaded = true
   }
 
   function saveSettings() {
-    settingsFile.setText(JSON.stringify({ version: 1, enabled: root.enabled }, null, 2) + "\n")
+    settingsFile.setText(JSON.stringify({ version: 1, enabled: root.soundEnabled }, null, 2) + "\n")
   }
 
   Process {
@@ -104,25 +104,25 @@ Item {
 
   // State-changing helpers, callable directly (bar widget) and via IPC (menu).
   function toggleEnabled(): string {
-    root.enabled = !root.enabled
+    root.soundEnabled = !root.soundEnabled
     root.saveSettings()
-    return root.enabled ? "on" : "off"
+    return root.soundEnabled ? "on" : "off"
   }
   function setEnabled(value: string): string {
     var v = String(value || "").toLowerCase()
-    root.enabled = v === "true" || v === "1" || v === "on" || v === "yes"
+    root.soundEnabled = v === "true" || v === "1" || v === "on" || v === "yes"
     root.saveSettings()
-    return root.enabled ? "on" : "off"
+    return root.soundEnabled ? "on" : "off"
   }
 
   IpcHandler {
     target: "virtuoso.notification-sounds"
 
     function status(): string {
-      return root.enabled ? "on" : "off"
+      return root.soundEnabled ? "on" : "off"
     }
     function isEnabled(): string {
-      return root.enabled ? "on" : "off"
+      return root.soundEnabled ? "on" : "off"
     }
     function toggle(): string {
       return root.toggleEnabled()
@@ -223,7 +223,7 @@ Item {
       }
 
       // Respect the runtime toggle: no sound while the plugin is disabled.
-      if (!root.enabled) return
+      if (!root.soundEnabled) return
 
       var sound = root.soundFor(row)
       if (sound) root.play(sound)

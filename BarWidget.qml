@@ -3,7 +3,6 @@
 // is shared with the Service.qml instance (the same plugin's service entry).
 
 import QtQuick
-import Quickshell
 import qs.Ui
 
 BarWidget {
@@ -15,7 +14,7 @@ BarWidget {
   readonly property var hostShell: bar && bar.shell ? bar.shell : null
   readonly property var soundService: hostShell && hostShell.firstPartyServiceFor
     ? hostShell.firstPartyServiceFor("virtuoso.notification-sounds") : null
-  readonly property bool soundsOn: soundService ? !!soundService.enabled : true
+  readonly property bool soundsOn: soundService ? !!soundService.soundEnabled : true
 
   function toggle() {
     if (soundService && typeof soundService.toggleEnabled === "function")
