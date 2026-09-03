@@ -1,0 +1,4 @@
+#!/bin/bash
+# Ocean "complete-media-burn" when `omarchy update` finishes its package pass.
+# Installed by virtuoso.notification-sounds.
+omarchy-sound play complete-media-burn

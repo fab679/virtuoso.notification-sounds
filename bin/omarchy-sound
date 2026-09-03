@@ -1,0 +1,186 @@
+#!/usr/bin/env bash
+
+# omarchy:summary=Play an Ocean sound theme event system-wide
+# omarchy:args=[-f] [-w] [--throttle <ms>] [play] <event> | notify <event> <summary> [body] | outcome <exit-code> | list | test | status
+# omarchy:examples=omarchy-sound power-plug | omarchy-sound notify message-new-email "Inbox" "1 new message"
+# omarchy:group=system
+# omarchy:name=sound
+
+# The one place anything on this system turns an event into a sound.
+#
+# Two ways to make noise, and they are not interchangeable:
+#
+#   play    plays the .oga directly. Use it for events that must NOT leave a
+#           toast behind — volume keys, login, logout, screenshots.
+#   notify  raises a real desktop notification carrying a sound-name hint; the
+#           virtuoso.notification-sounds shell plugin sees the hint and plays
+#           the same file. Use it whenever the user should also SEE the event.
+#
+# Both honour the same two gates, so muting the bar widget or switching on Do
+# Not Disturb silences the whole system, not just notification toasts:
+#   ~/.local/state/omarchy/notification-sounds.json  -> {"enabled": bool}
+#   ~/.local/state/omarchy/notifications.json        -> {"dnd": bool}
+
+set -uo pipefail
+
+PLUGIN_SOUNDS="$HOME/.config/omarchy/plugins/virtuoso.notification-sounds/sounds"
+THEME_SOUNDS="/usr/share/sounds/ocean/stereo"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/omarchy"
+SOUND_SETTINGS="$STATE_DIR/notification-sounds.json"
+NOTIFY_SETTINGS="$STATE_DIR/notifications.json"
+THROTTLE_DIR="${XDG_RUNTIME_DIR:-/tmp}/omarchy-sound"
+
+force=0
+throttle_ms=0
+wait_for_play=0
+
+die() { printf 'omarchy-sound: %s\n' "$*" >&2; exit 1; }
+
+# Bundled copies first so the sounds keep working if the ocean package goes
+# away, then the system theme as the fallback.
+sound_dir() {
+  if [ -d "$PLUGIN_SOUNDS" ]; then printf '%s' "$PLUGIN_SOUNDS"; else printf '%s' "$THEME_SOUNDS"; fi
+}
+
+resolve() {
+  local name="${1%.oga}" dir
+  dir="$(sound_dir)"
+  [ -f "$dir/$name.oga" ] && { printf '%s' "$dir/$name.oga"; return 0; }
+  [ -f "$THEME_SOUNDS/$name.oga" ] && { printf '%s' "$THEME_SOUNDS/$name.oga"; return 0; }
+  return 1
+}
+
+# A JSON boolean read without pulling in jq: these two files are written by the
+# shell and by this plugin, both flat objects, so a targeted grep is enough and
+# keeps the volume-key path free of a process spawn.
+json_bool() {
+  local file="$1" key="$2" default="$3" value
+  [ -f "$file" ] || { printf '%s' "$default"; return; }
+  value=$(grep -o "\"$key\"[[:space:]]*:[[:space:]]*\(true\|false\)" "$file" 2>/dev/null | tail -1)
+  case "$value" in
+    *true) printf 'true' ;;
+    *false) printf 'false' ;;
+    *) printf '%s' "$default" ;;
+  esac
+}
+
+sounds_enabled() { [ "$(json_bool "$SOUND_SETTINGS" enabled true)" = true ]; }
+dnd_on() { [ "$(json_bool "$NOTIFY_SETTINGS" dnd false)" = true ]; }
+
+allowed() {
+  ((force)) && return 0
+  sounds_enabled || return 1
+  dnd_on && return 1
+  return 0
+}
+
+# Held volume/brightness keys autorepeat; without this a two-second hold queues
+# a dozen overlapping copies of the same sample.
+throttled() {
+  local name="$1" now last
+  ((throttle_ms > 0)) || return 1
+  mkdir -p "$THROTTLE_DIR" 2>/dev/null
+  now=$(date +%s%3N)
+  last=$(cat "$THROTTLE_DIR/$name" 2>/dev/null || echo 0)
+  if (( now - last < throttle_ms )); then return 0; fi
+  printf '%s' "$now" > "$THROTTLE_DIR/$name"
+  return 1
+}
+
+player() {
+  if command -v pw-play >/dev/null 2>&1; then printf 'pw-play'
+  elif command -v paplay >/dev/null 2>&1; then printf 'paplay'
+  else return 1; fi
+}
+
+cmd_play() {
+  local name="${1:-}" file cmd
+  [ -n "$name" ] || die "play needs an event name (see: omarchy-sound list)"
+  file=$(resolve "$name") || die "no such sound: $name"
+  allowed || exit 0
+  throttled "$name" && exit 0
+  cmd=$(player) || die "no audio player found (install pipewire-audio or libpulse)"
+  # Detached by default so a volume key never waits on audio. --wait keeps the
+  # player in the foreground for callers that must not exit first: systemd
+  # ExecStop would reap a detached logout chime before a note of it came out.
+  if ((wait_for_play)); then
+    "$cmd" "$file" >/dev/null 2>&1
+  else
+    setsid -f "$cmd" "$file" >/dev/null 2>&1
+  fi
+}
+
+# The notification carries the sound name as a freedesktop hint rather than
+# playing anything here, so the shell plugin stays the single audio path and
+# one event can never produce two overlapping sounds.
+cmd_notify() {
+  local name="${1:-}" summary="${2:-}" body="${3:-}"
+  [ -n "$name" ] || die "notify needs an event name"
+  [ -n "$summary" ] || die "notify needs a summary"
+  resolve "$name" >/dev/null || die "no such sound: $name"
+  local urgency=1
+  case "$name" in
+    dialog-error*|battery-caution|outcome-failure|completion-fail|complete-media-error) urgency=2 ;;
+    message-*|completion-*|device-*|power-*|audio-*) urgency=0 ;;
+  esac
+  busctl --user -- call org.freedesktop.Notifications /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify susssasa{sv}i \
+    "${NOTIFY_APP_NAME:-omarchy-sound}" 0 "${NOTIFY_ICON:-}" "$summary" "$body" \
+    0 2 sound-name s "$name" urgency y "$urgency" "${NOTIFY_TIMEOUT:--1}" >/dev/null
+}
+
+# The generic "did that finish cleanly" chime, for wrapping anything slow:
+#   make -j8; omarchy-sound outcome $?
+# Kept as its own verb rather than two play calls so callers never have to
+# remember which Ocean sample means success.
+cmd_outcome() {
+  local code="${1:-0}"
+  [ "$code" = 0 ] && cmd_play outcome-success || cmd_play outcome-failure
+}
+
+cmd_list() {
+  local dir; dir="$(sound_dir)"
+  ls "$dir"/*.oga 2>/dev/null | xargs -rn1 basename | sed 's/\.oga$//'
+}
+
+# Walks every sound in the theme so you can actually hear what each event
+# sounds like before wiring it to something.
+cmd_test() {
+  local name file
+  while read -r name; do
+    file=$(resolve "$name") || continue
+    printf '%-28s %s\n' "$name" "$file"
+    "$(player)" "$file" >/dev/null 2>&1
+    sleep 0.35
+  done < <(cmd_list)
+}
+
+cmd_status() {
+  printf 'sound dir     : %s\n' "$(sound_dir)"
+  printf 'sounds bundled: %s\n' "$(cmd_list | wc -l)"
+  printf 'player        : %s\n' "$(player || echo 'NONE')"
+  printf 'plugin enabled: %s\n' "$(json_bool "$SOUND_SETTINGS" enabled true)"
+  printf 'do not disturb: %s\n' "$(json_bool "$NOTIFY_SETTINGS" dnd false)"
+  printf 'audible now   : %s\n' "$(allowed && echo yes || echo 'no (muted or DND)')"
+}
+
+while [ $# -gt 0 ]; do
+  case "$1" in
+    -f|--force) force=1; shift ;;
+    -w|--wait) wait_for_play=1; shift ;;
+    --throttle) throttle_ms="${2:-0}"; shift 2 ;;
+    -h|--help) sed -n '3,6p' "$0" | sed 's/^# omarchy:[a-z]*=//'; exit 0 ;;
+    *) break ;;
+  esac
+done
+
+case "${1:-}" in
+  play) shift; cmd_play "$@" ;;
+  notify) shift; cmd_notify "$@" ;;
+  outcome) shift; cmd_outcome "$@" ;;
+  list) cmd_list ;;
+  test) cmd_test ;;
+  status) cmd_status ;;
+  "") die "usage: omarchy-sound [play] <event> | notify <event> <summary> [body] | outcome <code> | list | test | status" ;;
+  *) cmd_play "$@" ;;
+esac

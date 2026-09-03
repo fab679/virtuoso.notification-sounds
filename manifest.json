@@ -2,9 +2,9 @@
   "schemaVersion": 1,
   "id": "virtuoso.notification-sounds",
   "name": "Notification Sounds",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Virtuoso",
-  "description": "Ocean sound effects for desktop notifications and USB hotplug. Toggleable from the bar and the launcher menu; silenced while Do Not Disturb is on.",
+  "description": "Ocean sound theme wired into the whole desktop: notifications, volume keys, login/logout, USB and bluetooth hotplug, AC power, battery, and network. Toggleable from the bar and the launcher menu; silenced by Do Not Disturb.",
   "kinds": [
     "service",
     "bar-widget"

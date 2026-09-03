@@ -1,0 +1,4 @@
+#!/bin/bash
+# Ocean "completion-partial" when the system font changes. $1 is the font name.
+# Installed by virtuoso.notification-sounds.
+omarchy-sound play completion-partial

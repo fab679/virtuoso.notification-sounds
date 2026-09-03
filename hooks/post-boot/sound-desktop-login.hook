@@ -1,0 +1,4 @@
+#!/bin/bash
+# Ocean "desktop-login" chime once the Omarchy desktop has finished starting.
+# Installed by virtuoso.notification-sounds.
+omarchy-sound play desktop-login

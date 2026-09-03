@@ -1,0 +1,20 @@
+[Unit]
+Description=Ocean sounds for AC, battery, network and bluetooth events
+Documentation=man:omarchy-sound(1)
+PartOf=graphical-session.target
+After=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/omarchy-sound-watch
+Restart=always
+RestartSec=5
+# The watchers only read sysfs and listen on D-Bus; nothing here needs to write
+# anywhere outside the runtime throttle directory.
+ProtectSystem=strict
+ProtectHome=read-only
+PrivateTmp=yes
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=graphical-session.target

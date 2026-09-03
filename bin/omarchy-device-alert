@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+
+# omarchy:summary=Notify on USB device connect/disconnect
+# omarchy:group=system
+# omarchy:name=device-alert
+
+# Watches USB hotplug events and raises a device notification. The sound comes
+# from the virtuoso.notification-sounds plugin, which reads the category hint
+# (device -> device-added.oga, device.removed -> device-removed.oga).
+#
+# The hint has to travel as a real a{sv} entry, so this calls Notify through
+# busctl with the full susssasa{sv}i signature. omarchy-notification-send has
+# no --category flag and notify-send would reinterpret device names that begin
+# with a dash as options.
+#
+# Run with "-" to read udev --property output from stdin (for testing).
+
+notify() {
+  local category="$1" summary="$2" body="$3"
+  busctl --user -- call org.freedesktop.Notifications /org/freedesktop/Notifications \
+    org.freedesktop.Notifications Notify susssasa{sv}i \
+    "USB Devices" 0 "drive-removable-media-usb" "$summary" "$body" \
+    0 2 category s "$category" urgency y 0 4000 >/dev/null 2>&1
+}
+
+alert() {
+  local action="$1" devtype="$2" v_raw="$3" v_db="$4" m_raw="$5" m_db="$6"
+  [ "$devtype" != "usb_device" ] && return 0
+  local vendor="${v_db:-$v_raw}" model="${m_db:-$m_raw}"
+  local name="$vendor $model"
+  name="${name//  / }"
+  name="${name#"${name%%[![:space:]]*}"}"
+  name="${name%"${name##*[![:space:]]}"}"
+  [ -z "$name" ] && name="USB device"
+  case "$action" in
+    add) notify "device" "USB device connected" "$name" ;;
+    remove) notify "device.removed" "USB device disconnected" "$name" ;;
+  esac
+}
+
+action=""; devtype=""; v_raw=""; v_db=""; m_raw=""; m_db=""
+while IFS= read -r line; do
+  case "$line" in
+    KERNEL*)
+      action=""; devtype=""; v_raw=""; v_db=""; m_raw=""; m_db=""
+      ;;
+    ACTION=*) action="${line#ACTION=}" ;;
+    DEVTYPE=*) devtype="${line#DEVTYPE=}" ;;
+    ID_VENDOR_FROM_DATABASE=*) v_db="${line#ID_VENDOR_FROM_DATABASE=}" ;;
+    ID_VENDOR=*) v_raw="${line#ID_VENDOR=}" ;;
+    ID_MODEL_FROM_DATABASE=*) m_db="${line#ID_MODEL_FROM_DATABASE=}" ;;
+    ID_MODEL=*) m_raw="${line#ID_MODEL=}" ;;
+    "") alert "$action" "$devtype" "$v_raw" "$v_db" "$m_raw" "$m_db" ;;
+  esac
+done < <(if [ "$1" = "-" ]; then cat; else udevadm monitor --udev --property --subsystem-match=usb; fi)

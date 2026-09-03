@@ -1,0 +1,180 @@
+#!/usr/bin/env bash
+
+# omarchy:summary=Watch system events (AC, battery, network, bluetooth) and play Ocean sounds
+# omarchy:group=system
+# omarchy:name=sound-watch
+# omarchy:hidden=true
+
+# Long-running companion to omarchy-sound. Everything here is an event the
+# desktop has no notification for, so nothing else would ever make a sound:
+#
+#   AC connected / disconnected        -> power-plug / power-unplug
+#   battery reaches full               -> battery-full
+#   battery critical (<= CRITICAL_PCT) -> battery-caution  (+ a toast)
+#   NetworkManager online / offline    -> service-login / service-logout
+#   bluetooth device connect/disconnect-> device-added / device-removed
+#
+# Each watcher blocks on an event source (udev, nmcli, D-Bus) and re-reads the
+# real state when woken, rather than trusting the event payload. `read -t` gives
+# every loop a slow poll as well, so a missed or malformed event self-corrects
+# within one interval instead of wedging the watcher until restart.
+#
+# Toggle individual watchers in ~/.config/omarchy/sound-events.conf.
+
+set -uo pipefail
+
+CONF="${OMARCHY_SOUND_CONF:-${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/sound-events.conf}"
+
+# Defaults, overridable from the environment and then from the config file, so
+# a one-off run can be steered without editing anything on disk. Plain
+# assignment here would clobber an exported override before the file was even
+# read, which is exactly what the transition tests need to avoid.
+SOUND_POWER="${SOUND_POWER:-1}"
+SOUND_BATTERY="${SOUND_BATTERY:-1}"
+SOUND_NETWORK="${SOUND_NETWORK:-1}"
+SOUND_BLUETOOTH="${SOUND_BLUETOOTH:-1}"
+CRITICAL_PCT="${CRITICAL_PCT:-5}"
+POLL_SECONDS="${POLL_SECONDS:-30}"
+
+# Overridable so the AC/battery transitions can be tested against a fake sysfs
+# tree instead of waiting on a real power cable.
+POWER_SUPPLY_ROOT="${POWER_SUPPLY_ROOT:-/sys/class/power_supply}"
+
+# shellcheck source=/dev/null
+[ -f "$CONF" ] && . "$CONF"
+
+play() { omarchy-sound play "$1" >/dev/null 2>&1 || true; }
+notify() { omarchy-sound notify "$@" >/dev/null 2>&1 || true; }
+
+# Block until the event source says something, or POLL_SECONDS elapses.
+# `read -t` cannot tell a timeout from a closed pipe by exit status alone --
+# a timeout exits >128, EOF exits 1 -- and the difference matters: if the
+# monitor process dies, an unchecked loop would spin on instant EOF and burn a
+# core. On EOF we fall back to a plain sleep and keep polling forever.
+wake() {
+  local status
+  read -r -t "$POLL_SECONDS" _
+  status=$?
+  (( status > 128 || status == 0 )) && return 0
+  sleep "$POLL_SECONDS"
+}
+
+read_int() { local v; v=$(cat "$1" 2>/dev/null) || return 1; printf '%s' "${v//[!0-9]/}"; }
+
+# ------------------------------------------------------------------- power/battery
+
+ac_online() {
+  local f
+  for f in "$POWER_SUPPLY_ROOT"/*/online; do
+    [ -r "$f" ] || continue
+    [ "$(cat "${f%/online}/type" 2>/dev/null)" = Mains ] || continue
+    [ "$(cat "$f")" = 1 ] && { printf 1; return; }
+  done
+  printf 0
+}
+
+battery_path() {
+  local d
+  for d in "$POWER_SUPPLY_ROOT"/*; do
+    [ "$(cat "$d/type" 2>/dev/null)" = Battery ] && { printf '%s' "$d"; return 0; }
+  done
+  return 1
+}
+
+power_loop() {
+  local bat last_ac ac cap status last_full=0 last_critical=0
+  bat=$(battery_path) || bat=""
+  last_ac=$(ac_online)
+
+  while :; do
+    ac=$(ac_online)
+    if [ "$ac" != "$last_ac" ]; then
+      last_ac=$ac
+      if ((SOUND_POWER)); then
+        [ "$ac" = 1 ] && play power-plug || play power-unplug
+      fi
+    fi
+
+    if ((SOUND_BATTERY)) && [ -n "$bat" ]; then
+      cap=$(read_int "$bat/capacity") || cap=""
+      status=$(cat "$bat/status" 2>/dev/null)
+
+      # Fire once per charge cycle: armed again only after it drops back down.
+      if [ -n "$cap" ] && { [ "$status" = Full ] || { [ "$cap" -ge 100 ] && [ "$status" = Charging ]; }; }; then
+        ((last_full)) || { play battery-full; last_full=1; }
+      elif [ -n "$cap" ] && [ "$cap" -lt 95 ]; then
+        last_full=0
+      fi
+
+      if [ -n "$cap" ] && [ "$status" = Discharging ] && [ "$cap" -le "$CRITICAL_PCT" ]; then
+        ((last_critical)) || {
+          notify battery-caution "Battery critical" "${cap}% left — plug in now"
+          last_critical=1
+        }
+      elif [ "$status" != Discharging ] || { [ -n "$cap" ] && [ "$cap" -gt "$CRITICAL_PCT" ]; }; then
+        last_critical=0
+      fi
+    fi
+
+    # udev wakes us the moment the cable moves; the timeout is the safety poll.
+    wake
+  done < <(udevadm monitor --udev --subsystem-match=power_supply 2>/dev/null)
+}
+
+# ------------------------------------------------------------------- network
+
+nm_online() {
+  case "$(nmcli -t -f STATE general 2>/dev/null)" in
+    connected*) printf 1 ;;
+    *) printf 0 ;;
+  esac
+}
+
+network_loop() {
+  local last state
+  last=$(nm_online)
+  while :; do
+    state=$(nm_online)
+    if [ "$state" != "$last" ]; then
+      last=$state
+      [ "$state" = 1 ] && play service-login || play service-logout
+    fi
+    wake
+  done < <(nmcli monitor 2>/dev/null)
+}
+
+# ------------------------------------------------------------------- bluetooth
+
+bt_connected_count() {
+  local n
+  n=$(busctl --system --json=short call org.bluez / org.freedesktop.DBus.ObjectManager \
+        GetManagedObjects 2>/dev/null | grep -o '"Connected":{"type":"b","data":true}' | wc -l)
+  printf '%s' "${n:-0}"
+}
+
+bluetooth_loop() {
+  local last now
+  last=$(bt_connected_count)
+  while :; do
+    now=$(bt_connected_count)
+    if [ "$now" != "$last" ]; then
+      # A pair of devices can flip in the same window; compare counts, not names.
+      [ "$now" -gt "$last" ] && play device-added || play device-removed
+      last=$now
+    fi
+    wake
+  done < <(dbus-monitor --system \
+      "type='signal',interface='org.freedesktop.DBus.Properties',member='PropertiesChanged',arg0='org.bluez.Device1'" 2>/dev/null)
+}
+
+# -------------------------------------------------------------------------- main
+
+pids=()
+if ((SOUND_POWER)) || ((SOUND_BATTERY)); then power_loop & pids+=($!); fi
+if ((SOUND_NETWORK)) && command -v nmcli >/dev/null 2>&1; then network_loop & pids+=($!); fi
+if ((SOUND_BLUETOOTH)) && command -v dbus-monitor >/dev/null 2>&1; then bluetooth_loop & pids+=($!); fi
+
+((${#pids[@]})) || { echo "omarchy-sound-watch: every watcher is disabled" >&2; exit 0; }
+
+trap 'kill "${pids[@]}" 2>/dev/null' EXIT INT TERM
+wait -n

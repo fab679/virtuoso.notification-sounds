@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Remove Omarchy Notification Sounds and everything it set up:
-#   plugin folder, shell.json entries, launcher menu toggle, USB alert service.
+#   plugin folder, shell.json entries, launcher menu toggle, USB alert service,
+#   the omarchy-sound CLI, the event watchers, the hooks and the keybindings.
 # Safe to re-run.
 set -euo pipefail
 
@@ -13,12 +14,47 @@ ALERT_UNIT="$HOME/.config/systemd/user/omarchy-device-alert.service"
 
 say() { printf '==> %s\n' "$*"; }
 
-say "1/4 remove USB alert service"
+say "1/7 remove the event watcher and logout chime services"
+for unit in omarchy-sound-watch.service omarchy-sound-session.service; do
+  systemctl --user disable --now "$unit" >/dev/null 2>&1 || true
+  rm -f "$HOME/.config/systemd/user/$unit"
+done
+systemctl --user daemon-reload
+
+say "2/7 remove the CLI, hooks and event config"
+rm -f "$HOME/.local/bin/omarchy-sound" "$HOME/.local/bin/omarchy-sound-watch"
+rm -f "$HOME/.config/omarchy/hooks/post-boot.d/sound-desktop-login.hook" \
+      "$HOME/.config/omarchy/hooks/theme-set.d/sound-theme-changed.hook" \
+      "$HOME/.config/omarchy/hooks/font-set.d/sound-font-changed.hook" \
+      "$HOME/.config/omarchy/hooks/post-update.d/sound-update-finished.hook" \
+      "$HOME/.config/omarchy/sound-events.conf"
+
+say "3/7 remove the volume and screenshot keybindings"
+BINDINGS="$HOME/.config/hypr/bindings.lua"
+if grep -q "virtuoso.notification-sounds" "$BINDINGS" 2>/dev/null; then
+  cp "$BINDINGS" "$BINDINGS.bak.$(date +%s)"
+  # The block is only ever appended, so everything from its banner to the end of
+  # the file belongs to this plugin and can be cut wholesale.
+  python3 - "$BINDINGS" <<'PYCUT'
+import sys
+path = sys.argv[1]
+lines = open(path).read().splitlines(keepends=True)
+for i, line in enumerate(lines):
+    if "Ocean sound effects (virtuoso.notification-sounds)" in line:
+        start = i - 1 if i and lines[i - 1].startswith("-- ---") else i
+        open(path, "w").write("".join(lines[:start]).rstrip() + "\n")
+        break
+PYCUT
+  hyprctl reload >/dev/null 2>&1 || true
+  echo "     restored, and the volume keys are back to the Omarchy defaults"
+fi
+
+say "4/7 remove USB alert service"
 systemctl --user disable --now omarchy-device-alert.service >/dev/null 2>&1 || true
 rm -f "$ALERT_UNIT" "$ALERT_BIN"
 systemctl --user daemon-reload
 
-say "2/4 remove entries from shell.json"
+say "5/7 remove entries from shell.json"
 if [ -f "$SHELL_JSON" ]; then
   jq --arg id "$PLUGIN_ID" '
     .plugins = ((.plugins // []) | map(select(.id != $id)))
@@ -26,7 +62,7 @@ if [ -f "$SHELL_JSON" ]; then
   ' "$SHELL_JSON" > "$SHELL_JSON.tmp" && mv "$SHELL_JSON.tmp" "$SHELL_JSON"
 fi
 
-say "3/4 remove launcher menu toggle"
+say "6/7 remove launcher menu toggle"
 if [ -f "$MENU_JSONC" ]; then
   python3 - "$MENU_JSONC" <<'PY'
 import sys, re
@@ -57,7 +93,7 @@ open(p, 'w').write(s)
 PY
 fi
 
-say "4/4 remove plugin folder and restart the shell"
+say "7/7 remove plugin folder and restart the shell"
 rm -rf "$PLUGIN_DIR"
 omarchy restart shell
 

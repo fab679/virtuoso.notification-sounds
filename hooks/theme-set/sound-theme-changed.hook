@@ -1,0 +1,4 @@
+#!/bin/bash
+# Ocean "completion-rotation" whenever the theme rotates. $1 is the theme slug.
+# Installed by virtuoso.notification-sounds.
+omarchy-sound play completion-rotation

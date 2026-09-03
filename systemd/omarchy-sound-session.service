@@ -1,0 +1,19 @@
+[Unit]
+Description=Ocean logout chime
+PartOf=graphical-session.target
+After=graphical-session.target
+# The chime has to finish before the audio stack goes away, so stop this unit
+# before pipewire rather than alongside it.
+Before=pipewire.service pipewire-pulse.service wireplumber.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/bin/true
+# --wait keeps the player in the foreground; a detached one would be reaped the
+# instant ExecStop returned and never reach the speakers.
+ExecStop=%h/.local/bin/omarchy-sound --wait play desktop-logout
+TimeoutStopSec=6
+
+[Install]
+WantedBy=graphical-session.target

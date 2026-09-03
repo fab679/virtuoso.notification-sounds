@@ -47,21 +47,116 @@ Item {
   ]
 
   // Standard notification categories (freedesktop spec) -> Ocean sound.
-  // Ordered: most specific sub-event first, base category after. Sub-events
-  // containing "error" always fall back to dialog-error.oga.
+  // Ordered: most specific sub-event first, base category after, because the
+  // match is a prefix test and "device" would otherwise swallow
+  // "device.removed". Sub-events containing "error" fall back to
+  // dialog-error.oga before this table is consulted at all.
   property var categoryRules: [
+    ["device.added", "device-added.oga"],
     ["device.removed", "device-removed.oga"],
     ["device", "device-added.oga"],
+    ["email.arrived", "message-new-email.oga"],
     ["email.bounced", "dialog-error.oga"],
     ["email", "message-new-email.oga"],
+    ["im.received", "message-new-instant.oga"],
+    ["im.sent", "message-sent-instant.oga"],
     ["im", "message-new-instant.oga"],
-    ["network.disconnected", "bell.oga"],
+    ["network.connected", "service-login.oga"],
+    ["network.disconnected", "service-logout.oga"],
     ["network", "bell.oga"],
+    ["presence.offline", "message-contact-out.oga"],
+    ["presence.online", "message-contact-in.oga"],
     ["presence", "message-contact-in.oga"],
+    ["transfer.complete", "completion-success.oga"],
     ["transfer.failed", "completion-fail.oga"],
     ["transfer", "completion-success.oga"],
+    ["call.incoming", "phone-incoming-call.oga"],
     ["call.unanswered", "dialog-error.oga"],
-    ["call", "phone-incoming-call.oga"]
+    ["call.ended", "message-contact-out.oga"],
+    ["call", "phone-incoming-call.oga"],
+    ["mount", "media-insert-request.oga"],
+    ["alarm", "alarm-clock-elapsed.oga"],
+    ["battery.full", "battery-full.oga"],
+    ["battery.critical", "battery-caution.oga"],
+    ["battery", "battery-low.oga"],
+    ["power.connected", "power-plug.oga"],
+    ["power.disconnected", "power-unplug.oga"],
+    ["trash", "trash-empty.oga"],
+    ["question", "dialog-question.oga"],
+    ["auth", "dialog-warning-auth.oga"],
+    ["warning", "dialog-warning.oga"],
+    ["x-omarchy.crash", "dialog-error-serious.oga"],
+    ["media.error", "complete-media-error.oga"],
+    ["media", "complete-media-burn.oga"],
+    ["outcome.failure", "outcome-failure.oga"],
+    ["outcome", "outcome-success.oga"]
+  ]
+
+  // Omarchy's own notifications carry an "omarchy-glyph" hint instead of a
+  // category -- that glyph IS the event identity across the whole distro, so
+  // matching it is what gets first-party events (a reminder firing, a download
+  // finishing, a crash being captured) onto the right sound without patching
+  // any of the omarchy-* scripts.
+  //
+  // Every codepoint below was read out of the live /usr/bin/omarchy-* scripts
+  // rather than guessed from a Nerd Font chart, and is written as an escape so
+  // the table survives an editor or terminal that cannot render the glyph.
+  //
+  // Third column is the critical-urgency variant, because Omarchy reuses one
+  // glyph for both halves of an outcome: 󰒊 is "Sent to $name" AND, at critical,
+  // "Could not send to $name". Without the split, a failure would chime like a
+  // success.
+  //   [glyph, normal sound, critical sound (optional)]
+  // Keyed by NUMERIC codepoint, compared against g.codePointAt(0). These glyphs
+  // live in Plane 15 (U+F0000+), so a "\uf088c" string escape would silently be
+  // wrong -- JavaScript's \u takes exactly four hex digits, making that U+F088
+  // followed by a literal "c", which matches nothing. Numbers sidestep the
+  // escaping question entirely and read the same in any editor.
+  //   [codepoint, normal sound, critical sound (optional)]
+  property var glyphRules: [
+    [0xF088C, "alarm-clock-elapsed.oga"],                               // reminder
+    [0xF140B, "battery-low.oga", "battery-low.oga"],                    // time to recharge
+    [0xF0079, "battery-full.oga"],                                      // battery status
+    [0xF012C, "completion-success.oga"],                                // download complete
+    [0xF0156, "completion-fail.oga"],                                   // download failed
+    [0xF0D11, "completion-partial.oga"],                                // OCR text captured
+    [0xF014D, "button-pressed.oga"],                                    // URL copied
+    [0xF0432, "button-pressed-modifier.oga", "outcome-failure.oga"],    // QR copied / not found
+    [0xF048A, "message-sent-instant.oga", "outcome-failure.oga"],       // sent to device / failed
+    [0xF0BC9, "game-over-winner.oga", "game-over-loser.oga"],           // game installed / no cores
+    [0xF0379, "bell-window-system.oga"],                                // display configuration
+    [0xF10AC, "bell-window-system.oga"],                                // workspace layout
+    [0xF1104, "bell-window-system.oga"],                                // screensaver toggled
+    [0xF04B2, "bell.oga"],                                              // suspend availability
+    [0xF16A1, "dialog-error-serious.oga"],                              // crash captured
+    [0x0F021, "dialog-warning.oga"],                                    // pending migrations
+    [0x0270B, "dialog-warning.oga"],                                    // screensaver refused
+    [0x0EC12, "message-attention.oga"],                                 // voxtype ready
+    [0x0F03E, "complete-media-burn.oga"],                               // transcode finished
+    [0x0F03D, "media-insert-request.oga"],                              // transcode started
+    [0x0F2D0, "button-pressed-modifier.oga"],                           // aspect ratio toggled
+    [0x0F268, "trash-empty.oga"],                                       // web app removed
+    [0x0F489, "trash-empty.oga"]                                        // TUI removed
+  ]
+
+  // Notification icon -> Ocean sound, checked after category and before the
+  // urgency fallback. This is how first-party Omarchy notifications that carry
+  // no category hint still land on the right sound: omarchy-battery-low sends
+  // its warning with -i battery-caution and urgency critical, which would
+  // otherwise come out as the generic dialog-error-critical klaxon. Matching
+  // the icon keeps it to ONE sound for the event -- adding a battery-low.d
+  // hook instead would play a second one over the top of the toast's.
+  property var iconRules: [
+    ["battery-caution", "battery-low.oga"],
+    ["battery-low", "battery-low.oga"],
+    ["battery-full", "battery-full.oga"],
+    ["battery-charging", "power-plug.oga"],
+    ["drive-removable-media-usb", "device-added.oga"],
+    ["dialog-password", "dialog-warning-auth.oga"],
+    ["dialog-question", "dialog-question.oga"],
+    ["dialog-warning", "dialog-warning.oga"],
+    ["mail-unread", "message-new-email.oga"],
+    ["user-trash", "trash-empty.oga"]
   ]
 
   property string lowSound: soundDir + "/message-highlight.oga"
@@ -112,13 +207,24 @@ Item {
   function toggleEnabled(): string {
     root.soundEnabled = !root.soundEnabled
     root.saveSettings()
+    root.confirmEnabled()
     return root.soundEnabled ? "on" : "off"
   }
   function setEnabled(value: string): string {
     var v = String(value || "").toLowerCase()
+    var was = root.soundEnabled
     root.soundEnabled = v === "true" || v === "1" || v === "on" || v === "yes"
     root.saveSettings()
+    if (root.soundEnabled !== was) root.confirmEnabled()
     return root.soundEnabled ? "on" : "off"
+  }
+
+  // Switching sound back on plays the Ocean theme's own demo sample, so the
+  // click that unmutes is also the confirmation that audio actually works --
+  // otherwise re-enabling is silent and indistinguishable from a broken sink.
+  // Muting stays silent, which is the whole point of muting.
+  function confirmEnabled() {
+    if (root.soundEnabled) root.play(root.soundDir + "/theme-demo.oga")
   }
 
   IpcHandler {
@@ -142,6 +248,22 @@ Item {
     }
     function setEnabled(value: string): string {
       return root.setEnabled(value)
+    }
+
+    // Play one Ocean sound by name, for callers that already have the shell in
+    // hand. Scripts should prefer the omarchy-sound CLI: it works during login
+    // and logout, when this shell is not yet up or already gone.
+    function play(name: string): string {
+      var n = String(name || "").replace(/\.(oga|ogg)$/i, "")
+      if (root.knownSoundNames.indexOf(n) === -1) return "unknown sound: " + n
+      if (!root.soundEnabled) return "muted"
+      root.play(root.soundDir + "/" + n + ".oga")
+      return "playing " + n
+    }
+
+    // Every sound this plugin can resolve, newline separated.
+    function sounds(): string {
+      return root.knownSoundNames.join("\n")
     }
   }
 
@@ -169,8 +291,8 @@ Item {
   function soundFromHints(row) {
     var live = root.notificationService && row
       ? root.notificationService.liveRefs[row.originalId] : null
-    var hints = live && live.hints ? live.hints : null
-    if (!hints) return ""
+    if (!live) return ""
+    var hints = live.hints ? live.hints : {}
 
     // suppress-sound: the caller explicitly asks us not to make noise.
     if (hints["suppress-sound"] === true || String(hints["suppress-sound"]) === "true")
@@ -188,10 +310,49 @@ Item {
     var category = hints["category"]
     if (category) {
       var cat = String(category).toLowerCase()
-      if (cat.indexOf("error") !== -1) return root.soundDir + "/dialog-error.oga"
-      for (var i = 0; i < root.categoryRules.length; i++) {
+
+      // Three passes, in this order, because a single pass gets it wrong both
+      // ways round. Sub-event rules ("media.error") have to beat the generic
+      // "anything with error in it" shortcut, or media.error would come out as
+      // the plain error buzz. The shortcut in turn has to beat the base-category
+      // rules, or an unlisted "network.error" would chime like ordinary network
+      // news instead of a failure.
+      var i
+      for (i = 0; i < root.categoryRules.length; i++) {
+        if (root.categoryRules[i][0].indexOf(".") === -1) continue
         if (cat.indexOf(root.categoryRules[i][0]) === 0)
           return root.soundDir + "/" + root.categoryRules[i][1]
+      }
+      if (cat.indexOf("error") !== -1) return root.soundDir + "/dialog-error.oga"
+      for (i = 0; i < root.categoryRules.length; i++) {
+        if (root.categoryRules[i][0].indexOf(".") !== -1) continue
+        if (cat.indexOf(root.categoryRules[i][0]) === 0)
+          return root.soundDir + "/" + root.categoryRules[i][1]
+      }
+    }
+
+    // omarchy-glyph: first-party Omarchy events, keyed on the glyph they show.
+    var glyph = hints["omarchy-glyph"]
+    if (glyph) {
+      var g = String(glyph)
+      var cp = g.length ? g.codePointAt(0) : -1
+      var critical = Number(hints["urgency"]) === 2
+      for (var k = 0; k < root.glyphRules.length; k++) {
+        if (cp !== root.glyphRules[k][0]) continue
+        var pick = critical && root.glyphRules[k][2]
+          ? root.glyphRules[k][2] : root.glyphRules[k][1]
+        return root.soundDir + "/" + pick
+      }
+    }
+
+    // appIcon: the last chance to identify an event before urgency decides.
+    // Exact match only -- a substring test would let "battery-full" be caught
+    // by the "battery-low" rule depending on table order.
+    var icon = live.appIcon ? String(live.appIcon).toLowerCase() : ""
+    if (icon) {
+      for (var j = 0; j < root.iconRules.length; j++) {
+        if (icon === root.iconRules[j][0])
+          return root.soundDir + "/" + root.iconRules[j][1]
       }
     }
     return ""
