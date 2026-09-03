@@ -49,8 +49,14 @@ rm -rf "$STAGE"
 mkdir -p "$STAGE"
 cp "$SELF_DIR/manifest.json" "$SELF_DIR/Service.qml" "$SELF_DIR/BarWidget.qml" "$STAGE/"
 cp -r "$SELF_DIR/sounds" "$STAGE/"
-cp "$SELF_DIR/install.sh" "$SELF_DIR/uninstall.sh" "$STAGE/"
-chmod +x "$STAGE/install.sh" "$STAGE/uninstall.sh"
+cp "$SELF_DIR/install.sh" "$SELF_DIR/uninstall.sh" "$SELF_DIR/sound-events.conf" "$STAGE/"
+# Everything install.sh needs travels with the plugin, so re-running it from
+# ~/.config/omarchy/plugins/... -- the path the README and `omarchy plugin add`
+# both point at -- works without the git checkout still being around.
+for dir in bin hooks systemd hypr tools; do
+  [ -d "$SELF_DIR/$dir" ] && cp -r "$SELF_DIR/$dir" "$STAGE/"
+done
+chmod +x "$STAGE/install.sh" "$STAGE/uninstall.sh" "$STAGE/bin/"* 2>/dev/null || true
 if [ -d "$PLUGIN_DIR" ]; then mv "$PLUGIN_DIR" "$PLUGIN_DIR.old"; fi
 mv "$STAGE" "$PLUGIN_DIR"
 rm -rf "$PLUGIN_DIR.old"
@@ -90,9 +96,8 @@ fi
 say "4/7 install USB hotplug alerts"
 if [ "$USB" = 1 ]; then
   mkdir -p "$HOME/.local/bin" "$HOME/.config/systemd/user"
-  cp "$SELF_DIR/omarchy-device-alert" "$ALERT_BIN"
-  chmod +x "$ALERT_BIN"
-  cp "$SELF_DIR/omarchy-device-alert.service" "$ALERT_UNIT"
+  install -m755 "$SELF_DIR/bin/omarchy-device-alert" "$ALERT_BIN"
+  install -m644 "$SELF_DIR/systemd/omarchy-device-alert.service" "$ALERT_UNIT"
   systemctl --user daemon-reload
   systemctl --user enable --now omarchy-device-alert.service >/dev/null
   echo "     systemd user unit: omarchy-device-alert.service (enabled)"
