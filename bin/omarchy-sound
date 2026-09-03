@@ -231,7 +231,15 @@ cmd_doctor() {
   return $((problems > 0))
 }
 
+# Read straight from the manifest so `status` cannot disagree with the plugin
+# it is actually running out of.
+plugin_version() {
+  local m="$HOME/.config/omarchy/plugins/virtuoso.notification-sounds/manifest.json"
+  [ -f "$m" ] && sed -n 's/.*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$m" | head -1 || printf 'unknown'
+}
+
 cmd_status() {
+  printf 'version       : %s\n' "$(plugin_version)"
   printf 'sound dir     : %s\n' "$(sound_dir)"
   printf 'sounds bundled: %s\n' "$(cmd_list | wc -l)"
   printf 'player        : %s\n' "$(player || echo 'NONE')"
