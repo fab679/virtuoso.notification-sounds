@@ -16,33 +16,98 @@
 # Run with "-" to read udev --property output from stdin (for testing).
 
 notify() {
-  local category="$1" summary="$2" body="$3"
+  local category="$1" summary="$2" body="$3" icon="$4"
   busctl --user -- call org.freedesktop.Notifications /org/freedesktop/Notifications \
     org.freedesktop.Notifications Notify susssasa{sv}i \
-    "USB Devices" 0 "drive-removable-media-usb" "$summary" "$body" \
+    "USB Devices" 0 "$icon" "$summary" "$body" \
     0 2 category s "$category" urgency y 0 4000 >/dev/null 2>&1
 }
 
+# udev publishes every interface a USB device advertises as ID_USB_INTERFACES,
+# a colon-delimited list of six-hex-digit class/subclass/protocol triples --
+# ":030102:030101:" is a combo receiver claiming both a mouse and a keyboard.
+# That is the only reliable way to say "optical mouse" rather than just echoing
+# a vendor string, because the marketing name in ID_MODEL says nothing about
+# what the thing actually is.
+#
+# Composite devices claim several interfaces at once, so the table is ordered by
+# how much the answer tells you: a webcam that also exposes a microphone is a
+# webcam, and a flash drive that also exposes a HID control surface is a drive.
+# First match in this order wins.
+describe_device() {
+  local ifaces="$1"
+  case "$ifaces" in
+    *:08*) printf 'USB drive' ;;
+    *:030101*) printf 'Keyboard' ;;
+    *:030102*) printf 'Mouse' ;;
+    *:0e*) printf 'Webcam' ;;
+    *:06*) printf 'Camera' ;;
+    *:07*) printf 'Printer' ;;
+    *:01*) printf 'Audio device' ;;
+    *:02*|*:0a*) printf 'Network adapter' ;;
+    *:0b*) printf 'Smart card reader' ;;
+    *:e00101*) printf 'Bluetooth adapter' ;;
+    *:e0*) printf 'Wireless adapter' ;;
+    *:09*) printf 'USB hub' ;;
+    *:03*) printf 'Input device' ;;
+    *) printf 'USB device' ;;
+  esac
+}
+
+# Match the glyph to the description so the toast looks like what was plugged in.
+icon_for() {
+  case "$1" in
+    'USB drive') printf 'drive-removable-media-usb' ;;
+    Keyboard) printf 'input-keyboard' ;;
+    Mouse) printf 'input-mouse' ;;
+    Webcam|Camera) printf 'camera-web' ;;
+    Printer) printf 'printer' ;;
+    'Audio device') printf 'audio-headset' ;;
+    'Network adapter') printf 'network-wired' ;;
+    'Bluetooth adapter') printf 'bluetooth' ;;
+    'Wireless adapter') printf 'network-wireless' ;;
+    'USB hub') printf 'drive-removable-media-usb' ;;
+    *) printf 'drive-removable-media-usb' ;;
+  esac
+}
+
 alert() {
-  local action="$1" devtype="$2" v_raw="$3" v_db="$4" m_raw="$5" m_db="$6"
+  local action="$1" devtype="$2" v_raw="$3" v_db="$4" m_raw="$5" m_db="$6" ifaces="$7"
   [ "$devtype" != "usb_device" ] && return 0
-  local vendor="${v_db:-$v_raw}" model="${m_db:-$m_raw}"
+
+  # Root hubs appear on every boot and on every `udevadm trigger`; announcing
+  # them is noise about hardware nobody plugged in.
+  case "${m_db:-$m_raw}" in *"root hub"*) return 0 ;; esac
+
+  local kind; kind=$(describe_device "$ifaces")
+
+  # Prefer the usb.ids database names. The raw ID_VENDOR/ID_MODEL fallbacks are
+  # udev-sanitised, so spaces arrive as underscores -- "USB_Optical_Mouse" has
+  # to become "USB Optical Mouse" before anyone reads it. And when usb.ids has
+  # no entry, ID_VENDOR is just the bare hex id ("2a7a"), which is noise in a
+  # toast: drop it and let the model speak.
+  local vendor="${v_db:-${v_raw//_/ }}" model="${m_db:-${m_raw//_/ }}"
+  [[ -z $v_db && $vendor =~ ^[0-9a-fA-F]{4}$ ]] && vendor=""
+
   local name="$vendor $model"
   name="${name//  / }"
   name="${name#"${name%%[![:space:]]*}"}"
   name="${name%"${name##*[![:space:]]}"}"
-  [ -z "$name" ] && name="USB device"
+
+  # Headline says what it is, body says which one -- and when udev gives us no
+  # vendor or model at all, the headline alone still carries the useful part.
+  local icon; icon=$(icon_for "$kind")
   case "$action" in
-    add) notify "device" "USB device connected" "$name" ;;
-    remove) notify "device.removed" "USB device disconnected" "$name" ;;
+    add) notify "device" "$kind connected" "$name" "$icon" ;;
+    remove) notify "device.removed" "$kind disconnected" "$name" "$icon" ;;
   esac
 }
 
-action=""; devtype=""; v_raw=""; v_db=""; m_raw=""; m_db=""
+action=""; devtype=""; v_raw=""; v_db=""; m_raw=""; m_db=""; ifaces=""
 while IFS= read -r line; do
   case "$line" in
     KERNEL*)
-      action=""; devtype=""; v_raw=""; v_db=""; m_raw=""; m_db=""
+      action=""; devtype=""; v_raw=""; v_db=""; m_raw=""; m_db=""; ifaces=""
       ;;
     ACTION=*) action="${line#ACTION=}" ;;
     DEVTYPE=*) devtype="${line#DEVTYPE=}" ;;
@@ -50,6 +115,7 @@ while IFS= read -r line; do
     ID_VENDOR=*) v_raw="${line#ID_VENDOR=}" ;;
     ID_MODEL_FROM_DATABASE=*) m_db="${line#ID_MODEL_FROM_DATABASE=}" ;;
     ID_MODEL=*) m_raw="${line#ID_MODEL=}" ;;
-    "") alert "$action" "$devtype" "$v_raw" "$v_db" "$m_raw" "$m_db" ;;
+    ID_USB_INTERFACES=*) ifaces="${line#ID_USB_INTERFACES=}" ;;
+    "") alert "$action" "$devtype" "$v_raw" "$v_db" "$m_raw" "$m_db" "$ifaces" ;;
   esac
 done < <(if [ "$1" = "-" ]; then cat; else udevadm monitor --udev --property --subsystem-match=usb; fi)

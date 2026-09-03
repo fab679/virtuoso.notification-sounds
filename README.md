@@ -65,6 +65,14 @@ There is deliberately **no** `battery-low` hook: Omarchy already sends a low-bat
 | bluetooth connect / disconnect | `device-added` / `device-removed` |
 | USB connect / disconnect | `device-added` / `device-removed` |
 
+USB toasts name the kind of device, not just the vendor string: *Mouse connected*, *Keyboard connected*, *USB drive connected*, *Webcam connected*. The type comes from `ID_USB_INTERFACES`, the list of USB interface classes udev publishes for the device, which is the only thing that actually says what a device *is* — a marketing name in `ID_MODEL` does not. Composite devices claim several interfaces at once, so the most informative one wins: a webcam that also exposes a microphone is a webcam. Root hubs are skipped, since nobody plugged those in.
+
+Check it against your own hardware without unplugging anything:
+
+```bash
+bash tools/test-device-alert.sh add
+```
+
 Each watcher blocks on a real event source (udev, `nmcli monitor`, D-Bus) and re-reads the actual state when woken, with a slow poll behind it so a missed event self-corrects instead of wedging the watcher.
 
 Logout is handled separately by `omarchy-sound-session`, whose `ExecStop` plays `desktop-logout` synchronously and is ordered before PipeWire shuts down, so the chime actually reaches the speakers.
