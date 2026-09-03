@@ -22,6 +22,8 @@ done
 systemctl --user daemon-reload
 
 say "2/7 remove the CLI, hooks and event config"
+# -f removes a symlink without following it, so this never touches the plugin's
+# own copies -- only the links pointing at them.
 rm -f "$HOME/.local/bin/omarchy-sound" "$HOME/.local/bin/omarchy-sound-watch"
 rm -f "$HOME/.config/omarchy/hooks/post-boot.d/sound-desktop-login.hook" \
       "$HOME/.config/omarchy/hooks/theme-set.d/sound-theme-changed.hook" \

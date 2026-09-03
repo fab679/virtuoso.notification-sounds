@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # omarchy:summary=Play an Ocean sound theme event system-wide
-# omarchy:args=[-f] [-w] [--throttle <ms>] [play] <event> | notify <event> <summary> [body] | outcome <exit-code> | list | test | status
+# omarchy:args=[-f] [-w] [--throttle <ms>] [play] <event> | notify <event> <summary> [body] | outcome <exit-code> | list | test | status | doctor
 # omarchy:examples=omarchy-sound power-plug | omarchy-sound notify message-new-email "Inbox" "1 new message"
 # omarchy:group=system
 # omarchy:name=sound
@@ -155,6 +155,82 @@ cmd_test() {
   done < <(cmd_list)
 }
 
+# Reports whether every piece is actually wired up. The interesting failure this
+# catches is drift: `omarchy plugin update` refreshes the plugin directory but
+# never touches systemd units or hypr bindings, so those two can fall behind the
+# plugin they came from while everything still *looks* installed.
+cmd_doctor() {
+  local plugin="$HOME/.config/omarchy/plugins/virtuoso.notification-sounds"
+  local problems=0
+  note() { printf '  %-8s %s\n' "$1" "$2"; [ "$1" = "FAIL" ] && problems=$((problems + 1)); return 0; }
+
+  echo "plugin"
+  [ -d "$plugin" ] && note ok "installed at $plugin" || note FAIL "not installed at $plugin"
+  if [ -d "$plugin/.git" ]; then
+    note ok "git checkout -- updatable with: omarchy plugin update virtuoso.notification-sounds"
+  else
+    note warn "not a git checkout -- 'omarchy plugin update' cannot update it"
+  fi
+
+  echo "commands"
+  local exe
+  for exe in omarchy-sound omarchy-sound-watch omarchy-device-alert; do
+    local path="$HOME/.local/bin/$exe"
+    if [ -L "$path" ] && [ -e "$path" ]; then
+      note ok "$exe -> $(readlink "$path")"
+    elif [ -L "$path" ]; then
+      note FAIL "$exe is a broken symlink to $(readlink "$path")"
+    elif [ -x "$path" ]; then
+      note warn "$exe is a copy, not a link -- re-run install.sh so updates reach it"
+    else
+      note FAIL "$exe is missing"
+    fi
+  done
+
+  echo "hooks"
+  local hook
+  for hook in post-boot/sound-desktop-login theme-set/sound-theme-changed \
+              font-set/sound-font-changed post-update/sound-update-finished; do
+    local path="$HOME/.config/omarchy/hooks/${hook%%/*}.d/${hook##*/}.hook"
+    [ -e "$path" ] && note ok "${hook%%/*}" || note FAIL "${hook%%/*} hook missing"
+  done
+
+  echo "services"
+  local unit
+  for unit in omarchy-sound-watch omarchy-sound-session omarchy-device-alert; do
+    local state; state=$(systemctl --user is-active "$unit.service" 2>/dev/null)
+    [ "$state" = active ] && note ok "$unit" || note FAIL "$unit is $state"
+    # A unit newer in the plugin than the installed copy means an update landed
+    # that daemon-reload has not seen.
+    if [ -f "$plugin/systemd/$unit.service" ] &&
+       ! cmp -s "$plugin/systemd/$unit.service" "$HOME/.config/systemd/user/$unit.service"; then
+      note warn "$unit.service differs from the plugin copy -- re-run install.sh"
+    fi
+  done
+
+  echo "keybindings"
+  if grep -q "virtuoso.notification-sounds" "$HOME/.config/hypr/bindings.lua" 2>/dev/null; then
+    if cmp -s <(sed -n '/Ocean sound effects (virtuoso/,$p' "$HOME/.config/hypr/bindings.lua") \
+               <(sed -n '/Ocean sound effects (virtuoso/,$p' "$plugin/hypr/sound-bindings.lua") 2>/dev/null; then
+      note ok "volume and screenshot bindings present and current"
+    else
+      note warn "bindings differ from the plugin copy -- re-run install.sh to refresh"
+    fi
+  else
+    note warn "no sound bindings in hypr/bindings.lua (volume keys stay silent)"
+  fi
+
+  echo "audio"
+  player >/dev/null 2>&1 && note ok "player: $(player)" || note FAIL "no pw-play or paplay found"
+  local n; n=$(cmd_list | wc -l)
+  [ "$n" -gt 0 ] && note ok "$n sounds in $(sound_dir)" || note FAIL "no sounds found"
+  allowed && note ok "audible now" || note warn "silenced (muted or Do Not Disturb)"
+
+  echo
+  if [ "$problems" -eq 0 ]; then echo "No problems found."; else echo "$problems problem(s) found."; fi
+  return $((problems > 0))
+}
+
 cmd_status() {
   printf 'sound dir     : %s\n' "$(sound_dir)"
   printf 'sounds bundled: %s\n' "$(cmd_list | wc -l)"
@@ -181,6 +257,7 @@ case "${1:-}" in
   list) cmd_list ;;
   test) cmd_test ;;
   status) cmd_status ;;
-  "") die "usage: omarchy-sound [play] <event> | notify <event> <summary> [body] | outcome <code> | list | test | status" ;;
+  doctor) cmd_doctor ;;
+  "") die "usage: omarchy-sound [play] <event> | notify <event> <summary> [body] | outcome <code> | list | test | status | doctor" ;;
   *) cmd_play "$@" ;;
 esac
