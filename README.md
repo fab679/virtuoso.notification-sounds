@@ -105,28 +105,59 @@ The full Ocean sound set lives in the plugin's `sounds/` folder—no system pack
 
 ## Install
 
+Two commands. The first is the standard Omarchy plugin install; the second wires
+up the parts that live outside the shell.
+
 ```bash
-git clone https://github.com/fab679/virtuoso.notification-sounds.git
-cd virtuoso.notification-sounds && ./install.sh
+omarchy plugin add https://github.com/fab679/virtuoso.notification-sounds.git --enable
+~/.config/omarchy/plugins/virtuoso.notification-sounds/install.sh
 ```
 
-That one command copies the plugin into `~/.config/omarchy/plugins/`, enables it in `shell.json`, puts the speaker glyph at the far right of your bar, adds the launcher-menu toggle, installs the `omarchy-sound` CLI, the hooks, the keybindings, the USB alert service and the event watchers, validates, and restarts the shell. It is idempotent — safe to re-run whenever you pull a new version.
+After the first command notification sounds already work — that half is pure
+plugin, and it needs nothing else. The second adds the volume-key and screenshot
+bindings, the login/logout chimes, the hooks, and the AC/battery/network/
+bluetooth watchers. Skip it if you only want notifications voiced.
 
-Want notifications only, with none of the system-wide wiring? `./install.sh --no-system`. Skip just the USB alerts with `./install.sh --no-usb`.
-
-Requires Omarchy and PipeWire/PulseAudio with `pw-play` (`pipewire-utils`):
+Requires PipeWire or PulseAudio with `pw-play`:
 
 ```bash
 omarchy pkg add pipewire-utils
 ```
 
-Prefer the official path?
+### Update
 
 ```bash
-omarchy plugin add https://github.com/fab679/virtuoso.notification-sounds.git --enable
+omarchy plugin update virtuoso.notification-sounds
 ```
 
-then run `~/.config/omarchy/plugins/virtuoso.notification-sounds/install.sh` once to place the bar widget, menu toggle, CLI, hooks, keybindings and watchers.
+That is the whole update. The CLI, the watcher, the USB device alert and all
+four hooks are **symlinked** into the plugin directory rather than copied, so a
+single fast-forward refreshes every one of them — there is no second command to
+forget.
+
+Two things a `git merge` cannot refresh on its own: systemd units (systemd
+caches unit contents until a `daemon-reload`) and the Hyprland keybinding block.
+Those change rarely, and `omarchy-sound doctor` tells you when they have fallen
+behind:
+
+```bash
+omarchy-sound doctor    # re-run install.sh if it reports drift
+```
+
+### Installing from a clone
+
+If you would rather clone it yourself:
+
+```bash
+git clone https://github.com/fab679/virtuoso.notification-sounds.git
+cd virtuoso.notification-sounds && ./install.sh
+```
+
+`install.sh` knows where it is running from. Inside the plugin directory it
+copies nothing, leaving the `.git` that `omarchy plugin update` needs; from a
+clone elsewhere it refuses to overwrite a git-managed install rather than
+silently breaking future updates. Use `--no-system` for notifications only, or
+`--no-usb` to skip the USB hotplug service.
 
 ## Toggle
 
@@ -146,7 +177,7 @@ While the plugin is still installed:
 ~/.config/omarchy/plugins/virtuoso.notification-sounds/uninstall.sh
 ```
 
-That removes the plugin folder, its `shell.json` entries, the launcher-menu toggle, the CLI, the hooks, the event config, the three user units, and the keybinding block it appended to `~/.config/hypr/bindings.lua` (backing the file up first), then restarts the shell.
+That removes the symlinks, the hooks, the event config, the three user units, the launcher-menu toggle, the `shell.json` entries and the keybinding block it appended to `~/.config/hypr/bindings.lua` (backing that file up first), then restarts the shell. Follow it with `omarchy plugin remove virtuoso.notification-sounds` to delete the plugin directory itself.
 
 ## Credits
 
